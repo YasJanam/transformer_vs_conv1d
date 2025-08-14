@@ -1,0 +1,207 @@
+<div class="sourceCode" id="cb1"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true"></a><span class="co"># project : con1d vs transformer</span></span></code></pre></div>
+<div class="sourceCode" id="cb2"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="im">import</span> torch</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a><span class="im">import</span> torch.nn <span class="im">as</span> nn</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true"></a><span class="im">import</span> torch.optim <span class="im">as</span> optim</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true"></a><span class="im">from</span> transformers <span class="im">import</span> AutoTokenizer</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true"></a><span class="im">from</span> datasets <span class="im">import</span> load_dataset</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true"></a><span class="im">from</span> sklearn.manifold <span class="im">import</span> TSNE</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true"></a><span class="im">import</span> matplotlib.pyplot <span class="im">as</span> plt</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true"></a><span class="im">import</span> numpy <span class="im">as</span> np</span></code></pre></div>
+<div class="sourceCode" id="cb3"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true"></a><span class="co"># TransformerLayer</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true"></a><span class="kw">class</span> TransformerLayer(nn.Module):</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true"></a>  <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>,embed_dim,num_heads,ff_dim):</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true"></a>    <span class="bu">super</span>().<span class="fu">__init__</span>()</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true"></a>    <span class="va">self</span>.attention <span class="op">=</span> nn.MultiheadAttention(embed_dim<span class="op">=</span>embed_dim,num_heads<span class="op">=</span>num_heads)</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true"></a>    <span class="va">self</span>.feed_forward <span class="op">=</span> nn.Sequential(</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true"></a>        nn.Linear(embed_dim,ff_dim),</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true"></a>        nn.ReLU(),</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true"></a>        nn.Linear(ff_dim,embed_dim)</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true"></a>    )</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true"></a>    <span class="va">self</span>.norm1 <span class="op">=</span> nn.LayerNorm(embed_dim)</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true"></a>    <span class="va">self</span>.norm2 <span class="op">=</span> nn.LayerNorm(embed_dim)</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true"></a></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true"></a>  <span class="kw">def</span> forward(<span class="va">self</span>,x):</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true"></a>    attn_output,_ <span class="op">=</span> <span class="va">self</span>.attention(x,x,x)</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true"></a>    x <span class="op">=</span> <span class="va">self</span>.norm1(x <span class="op">+</span> attn_output)</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true"></a>    ff_output <span class="op">=</span> <span class="va">self</span>.feed_forward(x)</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true"></a>    x <span class="op">=</span> <span class="va">self</span>.norm2(x <span class="op">+</span> ff_output)</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true"></a>    <span class="cf">return</span> x</span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true"></a></span></code></pre></div>
+<div class="sourceCode" id="cb4"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="co"># Model</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="kw">class</span> ToyModel(nn.Module):</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true"></a>  <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>,vocab_size,embed_dim,num_heads,ff_dim,num_classes):</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true"></a>    <span class="bu">super</span>().<span class="fu">__init__</span>()</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true"></a>    <span class="va">self</span>.embedding <span class="op">=</span> nn.Embedding(vocab_size,embed_dim)</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true"></a>    <span class="va">self</span>.transformer1 <span class="op">=</span> TransformerLayer(embed_dim,num_heads,ff_dim)</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true"></a>    <span class="va">self</span>.transformer2 <span class="op">=</span> TransformerLayer(embed_dim,num_heads,ff_dim)</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true"></a>    <span class="va">self</span>.conv1d <span class="op">=</span> nn.Conv1d(embed_dim,embed_dim <span class="op">//</span> <span class="dv">2</span> , kernel_size <span class="op">=</span> <span class="dv">3</span> , padding <span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true"></a>    <span class="va">self</span>.fc <span class="op">=</span> nn.Linear(embed_dim <span class="op">//</span> <span class="dv">2</span> , num_classes)</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true"></a></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true"></a>  <span class="kw">def</span> forward(<span class="va">self</span>,x):</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true"></a>    x <span class="op">=</span> <span class="va">self</span>.embedding(x)</span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true"></a>    x <span class="op">=</span> <span class="va">self</span>.transformer1(x)</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true"></a>    embedding_before_conv <span class="op">=</span> <span class="va">self</span>.transformer2(x)</span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true"></a>    x <span class="op">=</span> embedding_before_conv.permute(<span class="dv">0</span>,<span class="dv">2</span>,<span class="dv">1</span>)</span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true"></a>    x <span class="op">=</span> <span class="va">self</span>.conv1d(x)</span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true"></a>    embedding_after_conv <span class="op">=</span> x.permute(<span class="dv">0</span>,<span class="dv">2</span>,<span class="dv">1</span>)</span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true"></a>    pooled_output <span class="op">=</span> embedding_after_conv.mean(dim<span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true"></a>    logits <span class="op">=</span> <span class="va">self</span>.fc(pooled_output)</span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true"></a>    <span class="cf">return</span> logits,embedding_before_conv,embedding_after_conv</span></code></pre></div>
+<div class="sourceCode" id="cb5"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true"></a><span class="co"># load IMDB dataset</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true"></a>dataset <span class="op">=</span> load_dataset(<span class="st">&quot;imdb&quot;</span>)</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true"></a>tokenizer <span class="op">=</span> AutoTokenizer.from_pretrained(<span class="st">&quot;bert-base-uncased&quot;</span>)</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true"></a></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true"></a><span class="kw">def</span> tokenize_function(examples):</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true"></a>  <span class="cf">return</span> tokenizer(examples[<span class="st">&quot;text&quot;</span>],padding<span class="op">=</span><span class="st">&quot;max_length&quot;</span>,truncation<span class="op">=</span><span class="va">True</span>,max_length<span class="op">=</span><span class="dv">128</span>)</span></code></pre></div>
+<pre><code>/usr/local/lib/python3.11/dist-packages/huggingface_hub/utils/_auth.py:94: UserWarning: 
+The secret `HF_TOKEN` does not exist in your Colab secrets.
+To authenticate with the Hugging Face Hub, create a token in your settings tab (https://huggingface.co/settings/tokens), set it as secret in your Google Colab and restart your session.
+You will be able to reuse this secret in all of your notebooks.
+Please note that authentication is recommended but still optional to access public models or datasets.
+  warnings.warn(
+
+
+
+README.md: 0.00B [00:00, ?B/s]
+
+
+
+train-00000-of-00001.parquet:   0%|          | 0.00/21.0M [00:00&lt;?, ?B/s]
+
+
+
+test-00000-of-00001.parquet:   0%|          | 0.00/20.5M [00:00&lt;?, ?B/s]
+
+
+
+unsupervised-00000-of-00001.parquet:   0%|          | 0.00/42.0M [00:00&lt;?, ?B/s]
+
+
+
+Generating train split:   0%|          | 0/25000 [00:00&lt;?, ? examples/s]
+
+
+
+Generating test split:   0%|          | 0/25000 [00:00&lt;?, ? examples/s]
+
+
+
+Generating unsupervised split:   0%|          | 0/50000 [00:00&lt;?, ? examples/s]
+
+
+
+tokenizer_config.json:   0%|          | 0.00/48.0 [00:00&lt;?, ?B/s]
+
+
+
+config.json:   0%|          | 0.00/570 [00:00&lt;?, ?B/s]
+
+
+
+vocab.txt:   0%|          | 0.00/232k [00:00&lt;?, ?B/s]
+
+
+
+tokenizer.json:   0%|          | 0.00/466k [00:00&lt;?, ?B/s]</code></pre>
+<div class="sourceCode" id="cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true"></a>tokenized_dataset <span class="op">=</span> dataset.<span class="bu">map</span>(tokenize_function,batched<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true"></a>tokenized_dataset<span class="op">=</span>tokenized_dataset.remove_columns([<span class="st">&quot;text&quot;</span>,<span class="st">&quot;token_type_ids&quot;</span>])</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true"></a>tokenized_dataset <span class="op">=</span> tokenized_dataset.rename_columns({ <span class="st">&#39;label&#39;</span> : <span class="st">&#39;labels&#39;</span>})</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true"></a></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true"></a>small_train_dataset <span class="op">=</span> tokenized_dataset[<span class="st">&quot;train&quot;</span>].shuffle(seed<span class="op">=</span><span class="dv">42</span>).select(<span class="bu">range</span>(<span class="dv">10000</span>))</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true"></a>small_test_dataset <span class="op">=</span> tokenized_dataset[<span class="st">&quot;test&quot;</span>].shuffle(seed<span class="op">=</span><span class="dv">42</span>).select(<span class="bu">range</span>(<span class="dv">1000</span>))</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true"></a></span></code></pre></div>
+<pre><code>Map:   0%|          | 0/25000 [00:00&lt;?, ? examples/s]
+
+
+
+Map:   0%|          | 0/25000 [00:00&lt;?, ? examples/s]
+
+
+
+Map:   0%|          | 0/50000 [00:00&lt;?, ? examples/s]</code></pre>
+<div class="sourceCode" id="cb9"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true"></a><span class="co"># __train__</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true"></a>model <span class="op">=</span> ToyModel(vocab_size<span class="op">=</span>tokenizer.vocab_size,embed_dim<span class="op">=</span><span class="dv">128</span>,num_heads<span class="op">=</span><span class="dv">4</span>,ff_dim<span class="op">=</span><span class="dv">256</span>,num_classes<span class="op">=</span><span class="dv">2</span>)</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true"></a>optimizer <span class="op">=</span> optim.Adam(model.parameters(),lr<span class="op">=</span><span class="fl">1e-3</span>)</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true"></a>criterion <span class="op">=</span> nn.CrossEntropyLoss()</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true"></a></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true"></a><span class="kw">def</span> collate_fn(batch):</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true"></a>    <span class="cf">return</span> {</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true"></a>        <span class="st">&#39;input_ids&#39;</span>: torch.tensor([item[<span class="st">&#39;input_ids&#39;</span>] <span class="cf">for</span> item <span class="kw">in</span> batch]),</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true"></a>        <span class="st">&#39;labels&#39;</span>: torch.tensor([item[<span class="st">&#39;labels&#39;</span>] <span class="cf">for</span> item <span class="kw">in</span> batch])</span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true"></a>    }</span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true"></a></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true"></a>train_loader <span class="op">=</span> torch.utils.data.DataLoader(small_train_dataset, batch_size<span class="op">=</span><span class="dv">32</span>, shuffle<span class="op">=</span><span class="va">True</span>, collate_fn<span class="op">=</span>collate_fn)</span></code></pre></div>
+<div class="sourceCode" id="cb10"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true"></a>num_epochs <span class="op">=</span> <span class="dv">3</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true"></a><span class="cf">for</span> epoch <span class="kw">in</span> <span class="bu">range</span>(num_epochs):</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true"></a>  <span class="cf">for</span> batch <span class="kw">in</span> train_loader:</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true"></a>    optimizer.zero_grad()</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true"></a>    logits,_,_<span class="op">=</span> model(batch[<span class="st">&quot;input_ids&quot;</span>])</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true"></a>    loss <span class="op">=</span> criterion(logits,batch[<span class="st">&quot;labels&quot;</span>])</span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true"></a>    loss.backward()</span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true"></a>    optimizer.step()</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true"></a>  <span class="bu">print</span>(<span class="ss">f&quot;Epoch </span><span class="sc">{</span>epoch<span class="op">+</span><span class="dv">1</span><span class="sc">}</span><span class="ss">/</span><span class="sc">{</span>num_epochs<span class="sc">}</span><span class="ss"> , Loss: </span><span class="sc">{</span>loss<span class="sc">.</span>item()<span class="sc">}</span><span class="ss">&quot;</span>)</span></code></pre></div>
+<pre><code>Epoch 1/3 , Loss: 0.6669922471046448
+Epoch 2/3 , Loss: 0.5379239320755005
+Epoch 3/3 , Loss: 0.36927247047424316</code></pre>
+<div class="sourceCode" id="cb12"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true"></a><span class="co">#  embeddings</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true"></a><span class="kw">def</span> collate_fn(batch):</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true"></a>    <span class="cf">return</span> {</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true"></a>        <span class="st">&#39;input_ids&#39;</span>: torch.tensor([item[<span class="st">&#39;input_ids&#39;</span>] <span class="cf">for</span> item <span class="kw">in</span> batch]),</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true"></a>        <span class="st">&#39;labels&#39;</span>: torch.tensor([item[<span class="st">&#39;labels&#39;</span>] <span class="cf">for</span> item <span class="kw">in</span> batch])</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true"></a>    }</span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true"></a></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true"></a>test_loader <span class="op">=</span> torch.utils.data.DataLoader(small_test_dataset,batch_size<span class="op">=</span><span class="dv">64</span>,shuffle<span class="op">=</span><span class="va">False</span>,collate_fn<span class="op">=</span>collate_fn)</span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true"></a>all_embeddings_before <span class="op">=</span> []</span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true"></a>all_embeddings_after <span class="op">=</span> []</span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true"></a>all_labels <span class="op">=</span> []</span></code></pre></div>
+<div class="sourceCode" id="cb13"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true"></a><span class="cf">with</span> torch.no_grad():</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true"></a>  <span class="cf">for</span> batch <span class="kw">in</span> test_loader:</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true"></a>    _,embeddings_before , embeddings_after <span class="op">=</span> model(batch[<span class="st">&quot;input_ids&quot;</span>])</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true"></a>    all_embeddings_before.append(embeddings_before[:,<span class="dv">0</span>,:].cpu().numpy())</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true"></a>    all_embeddings_after.append(embeddings_after[:,<span class="dv">0</span>,:].cpu().numpy())</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true"></a>    all_labels.extend(batch[<span class="st">&quot;labels&quot;</span>].cpu().numpy())</span></code></pre></div>
+<div class="sourceCode" id="cb14"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true"></a>all_embeddings_before <span class="op">=</span> np.concatenate(all_embeddings_before)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true"></a>all_embeddings_after <span class="op">=</span> np.concatenate(all_embeddings_after)</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true"></a>all_labels <span class="op">=</span> np.array(all_labels)</span></code></pre></div>
+<div class="sourceCode" id="cb15"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true"></a><span class="bu">print</span>(<span class="ss">f&quot;Shape of all_embeddings_before: </span><span class="sc">{</span>all_embeddings_before<span class="sc">.</span>shape<span class="sc">}</span><span class="ss">&quot;</span>)</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true"></a><span class="bu">print</span>(<span class="ss">f&quot;Shape of all_embeddings_after: </span><span class="sc">{</span>all_embeddings_after<span class="sc">.</span>shape<span class="sc">}</span><span class="ss">&quot;</span>)</span></code></pre></div>
+<pre><code>Shape of all_embeddings_before: (1000, 128)
+Shape of all_embeddings_after: (1000, 64)</code></pre>
+<h1 id="tsne-pca">tsne + pca</h1>
+<div class="sourceCode" id="cb17"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true"></a><span class="im">from</span> sklearn.decomposition <span class="im">import</span> PCA</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true"></a></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true"></a>target_dim <span class="op">=</span> all_embeddings_after.shape[<span class="dv">1</span>]</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true"></a>pca <span class="op">=</span> PCA(n_components <span class="op">=</span> target_dim)</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true"></a>embeddings_before_reduced <span class="op">=</span> pca.fit_transform(all_embeddings_before)</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true"></a></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true"></a><span class="co"># اطلاعات عمومی</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true"></a><span class="bu">print</span>(<span class="ss">f&quot;embeddings_before_reduced.shape : </span><span class="sc">{</span>embeddings_before_reduced<span class="sc">.</span>shape<span class="sc">}</span><span class="ss">&quot;</span>)</span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true"></a><span class="bu">print</span>(<span class="ss">f&quot;all_embeddings_after.shape : </span><span class="sc">{</span>all_embeddings_after<span class="sc">.</span>shape<span class="sc">}</span><span class="ss">&quot;</span>)</span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true"></a></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true"></a>combined_embeddings <span class="op">=</span> np.concatenate([embeddings_before_reduced,all_embeddings_after],axis<span class="op">=</span><span class="dv">0</span>)</span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true"></a></span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true"></a>pca2 <span class="op">=</span> PCA(n_components <span class="op">=</span><span class="dv">50</span>)</span>
+<span id="cb17-14"><a href="#cb17-14" aria-hidden="true"></a>combined_reduced <span class="op">=</span> pca2.fit_transform(combined_embeddings)</span>
+<span id="cb17-15"><a href="#cb17-15" aria-hidden="true"></a></span>
+<span id="cb17-16"><a href="#cb17-16" aria-hidden="true"></a>tsne <span class="op">=</span> TSNE(n_components<span class="op">=</span><span class="dv">2</span>,perplexity<span class="op">=</span><span class="dv">40</span>,learning_rate<span class="op">=</span><span class="dv">200</span>,n_iter<span class="op">=</span><span class="dv">1000</span>,random_state<span class="op">=</span><span class="dv">42</span>)</span>
+<span id="cb17-17"><a href="#cb17-17" aria-hidden="true"></a>tsne_result<span class="op">=</span>tsne.fit_transform(combined_reduced)</span>
+<span id="cb17-18"><a href="#cb17-18" aria-hidden="true"></a></span>
+<span id="cb17-19"><a href="#cb17-19" aria-hidden="true"></a>half <span class="op">=</span> <span class="bu">len</span>(embeddings_before_reduced)</span>
+<span id="cb17-20"><a href="#cb17-20" aria-hidden="true"></a>tsne_before <span class="op">=</span> tsne_result[:half]</span>
+<span id="cb17-21"><a href="#cb17-21" aria-hidden="true"></a>tsne_after <span class="op">=</span> tsne_result[half:]</span>
+<span id="cb17-22"><a href="#cb17-22" aria-hidden="true"></a></span>
+<span id="cb17-23"><a href="#cb17-23" aria-hidden="true"></a>plt.figure(figsize<span class="op">=</span>(<span class="dv">11</span>,<span class="dv">7</span>))</span>
+<span id="cb17-24"><a href="#cb17-24" aria-hidden="true"></a>plt.scatter(tsne_before[:,<span class="dv">0</span>],tsne_before[:,<span class="dv">1</span>],c<span class="op">=</span><span class="st">&#39;blue&#39;</span>,label<span class="op">=</span><span class="st">&quot;before conv1d&quot;</span>,alpha<span class="op">=</span><span class="fl">0.7</span>)</span>
+<span id="cb17-25"><a href="#cb17-25" aria-hidden="true"></a>plt.scatter(tsne_after[:,<span class="dv">0</span>],tsne_after[:,<span class="dv">1</span>],c<span class="op">=</span><span class="st">&#39;orange&#39;</span>,label<span class="op">=</span><span class="st">&quot;after conv1d&quot;</span>,alpha<span class="op">=</span><span class="fl">0.7</span>)</span>
+<span id="cb17-26"><a href="#cb17-26" aria-hidden="true"></a>plt.title(<span class="st">&quot;tsne&quot;</span>)</span>
+<span id="cb17-27"><a href="#cb17-27" aria-hidden="true"></a>plt.legend()</span>
+<span id="cb17-28"><a href="#cb17-28" aria-hidden="true"></a>plt.show()</span></code></pre></div>
+<pre><code>embeddings_before_reduced.shape : (1000, 64)
+all_embeddings_after.shape : (1000, 64)
+
+
+/usr/local/lib/python3.11/dist-packages/sklearn/manifold/_t_sne.py:1164: FutureWarning: &#39;n_iter&#39; was renamed to &#39;max_iter&#39; in version 1.5 and will be removed in 1.7.
+  warnings.warn(</code></pre>
+<figure>
+<img src="https://theonlineconverter.com/uploads/transformer_vs_conv1d_2_1755170373_files/transformer_vs_conv1d_2_1755170373_13_2.png" alt="" /><figcaption>png</figcaption>
+</figure>
