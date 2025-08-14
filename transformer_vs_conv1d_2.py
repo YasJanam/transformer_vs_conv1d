@@ -142,14 +142,14 @@ combined_embeddings = np.concatenate([embeddings_before_reduced,all_embeddings_a
 pca2 = PCA(n_components =50)
 combined_reduced = pca2.fit_transform(combined_embeddings)
 
-tsne = TSNE(n_components=2,perplexity=40,learning_rate=200,n_iter=1000,random_state=42)
+tsne = TSNE(n_components=2,learning_rate=200,n_iter=1000,random_state=42)
 tsne_result=tsne.fit_transform(combined_reduced)
 
 half = len(embeddings_before_reduced)
 tsne_before = tsne_result[:half]
 tsne_after = tsne_result[half:]
 
-plt.figure(figsize=(11,7))
+plt.figure(figsize=(7,5))
 plt.scatter(tsne_before[:,0],tsne_before[:,1],c='blue',label="before conv1d",alpha=0.7)
 plt.scatter(tsne_after[:,0],tsne_after[:,1],c='orange',label="after conv1d",alpha=0.7)
 plt.title("tsne")
